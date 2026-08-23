@@ -43,6 +43,12 @@ public abstract class ContentGridNode<G extends Grid<G, ?>, S, H> extends GridNo
     /** Offers up to {@code amount} of {@code stack} to the handler and returns the accepted amount. */
     protected abstract long fill(H handler, S stack, long amount, boolean execute);
 
+    /** Total content currently stored across the handler's tanks, saturating at Long.MAX_VALUE. */
+    protected abstract long handlerContentTotal(H handler);
+
+    /** Whether the handler currently holds content of the same type as {@code stack}. */
+    protected abstract boolean handlerContainsSame(H handler, S stack);
+
     protected abstract boolean isEmptyStack(S stack);
     // endregion
 
@@ -94,9 +100,45 @@ public abstract class ContentGridNode<G extends Grid<G, ?>, S, H> extends GridNo
         return fillDir(host, distList.get(index), stack, amount, execute, null);
     }
 
+    /**
+     * Whether any of this node's connections, excluding {@code inserter} and {@code excluded},
+     * currently holds content of the same type as {@code stack}. Read-only probe used by the
+     * external-push gate to treat momentarily full destinations as valid routes.
+     */
+    public boolean containsSameContent(S stack, BlockPos inserter, Set<BlockPos> excluded) {
+
+        if (!cached) {
+            cacheConnections();
+        }
+        IDuct<?, ?> duct = gridHost();
+        if (duct == null) {
+            return false;
+        }
+        for (Connection connection : distList) {
+            if (connection.targetPos.equals(inserter) || excluded.contains(connection.targetPos)) {
+                continue;
+            }
+            if (duct.getConnectionType(connection.direction) == DISABLED) {
+                continue;
+            }
+            IAttachment attachment = duct.getAttachment(connection.direction);
+            // An input-only side (servo) can never receive deliveries, so content behind it is not a route.
+            if (!attachment.allowsGridOutput()) {
+                continue;
+            }
+            if (connection.consumeInvalidation()) {
+                attachment.invalidate();
+            }
+            H handler = attachment.wrapExternalCapability(capability(), connection.capabilityCache.getCapability());
+            if (handler != null && handlerContainsSame(handler, stack)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Round-robin push of {@code amount} of {@code stack} into adjacent external handlers. Returns the accepted amount. */
     public long transmit(S stack, long amount, boolean execute, @Nullable Set<BlockPos> visitedTargets) {
-
         if (!cached) {
             cacheConnections();
         }
@@ -137,6 +179,9 @@ public abstract class ContentGridNode<G extends Grid<G, ?>, S, H> extends GridNo
             return 0;
         }
         IAttachment attachment = duct.getAttachment(dir);
+        if (!attachment.allowsGridOutput()) {
+            return 0;
+        }
         if (connection.consumeInvalidation()) {
             attachment.invalidate();
         }
@@ -144,9 +189,26 @@ public abstract class ContentGridNode<G extends Grid<G, ?>, S, H> extends GridNo
         if (handler == null) {
             return 0;
         }
-        long accepted = fill(handler, stack, amount, execute);
-        if (execute && accepted > 0 && grid instanceof BufferedContentGrid<?, ?, ?> buffered) {
-            buffered.auditNoteOut(accepted);
+        long accepted;
+        if (execute) {
+            long before = handlerContentTotal(handler);
+            accepted = fill(handler, stack, amount, true);
+            long after = handlerContentTotal(handler);
+            // Cross-check the claimed acceptance against the destination's actual content delta:
+            // the grid drains what fill() reports, so a destination that claims-but-voids destroys
+            // content in a way the grid-side ledger alone cannot see.
+            if (before != Long.MAX_VALUE && after != Long.MAX_VALUE && after - before != accepted) {
+                cofh.thermal.dynamics.ThermalDynamics.LOG.warn("Grid delivery mismatch at {}: destination claimed {} but its content changed by {}",
+                        connection.targetPos, accepted, after - before);
+            }
+            if (accepted > 0) {
+                cofh.thermal.dynamics.ThermalDynamics.LOG.debug("Grid delivered {} of {} offered to {}", accepted, amount, connection.targetPos);
+            }
+            if (accepted > 0 && grid instanceof BufferedContentGrid<?, ?, ?> buffered) {
+                buffered.auditNoteOut(accepted);
+            }
+        } else {
+            accepted = fill(handler, stack, amount, false);
         }
         if (accepted > 0 && visitedTargets != null) {
             visitedTargets.add(connection.targetPos);

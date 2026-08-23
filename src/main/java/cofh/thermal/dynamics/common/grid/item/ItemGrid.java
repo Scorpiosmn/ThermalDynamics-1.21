@@ -406,7 +406,7 @@ public class ItemGrid extends Grid<ItemGrid, ItemGridNode> {
     private int getInsertCapacity(ItemDuctBlockEntity duct, Direction side, ItemStack stack, int additionalReserved) {
 
         if (duct.getConnectionType(side) == IDuct.ConnectionType.DISABLED ||
-                duct.getAttachment(side) instanceof ItemFilterAttachment) {
+                !duct.getAttachment(side).allowsGridOutput()) {
             return 0;
         }
         BlockPos target = duct.getBlockPos().relative(side);
@@ -488,7 +488,7 @@ public class ItemGrid extends Grid<ItemGrid, ItemGridNode> {
             int count = 0;
             for (Direction side : DIRECTIONS) {
                 if (duct.getConnectionType(side) != IDuct.ConnectionType.DISABLED &&
-                        !(duct.getAttachment(side) instanceof ItemFilterAttachment)) {
+                        duct.getAttachment(side).allowsGridOutput()) {
                     ++count;
                 }
             }
@@ -499,7 +499,7 @@ public class ItemGrid extends Grid<ItemGrid, ItemGridNode> {
             int index = 0;
             for (Direction side : DIRECTIONS) {
                 if (duct.getConnectionType(side) != IDuct.ConnectionType.DISABLED &&
-                        !(duct.getAttachment(side) instanceof ItemFilterAttachment)) {
+                        duct.getAttachment(side).allowsGridOutput()) {
                     sides[index++] = side;
                 }
             }

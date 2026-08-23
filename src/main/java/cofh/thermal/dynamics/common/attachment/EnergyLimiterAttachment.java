@@ -90,6 +90,13 @@ public class EnergyLimiterAttachment implements IAttachment, IRedstoneControllab
     }
 
     @Override
+    public boolean allowsGridOutput() {
+
+        // Rate limiter, not a direction gate: energy still flows out through this side.
+        return true;
+    }
+
+    @Override
     public Direction side() {
 
         return side;

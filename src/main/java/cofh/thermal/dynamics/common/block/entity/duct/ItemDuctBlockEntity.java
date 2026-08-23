@@ -244,7 +244,7 @@ public class ItemDuctBlockEntity extends DuctBlockEntity<ItemGrid, ItemGridNode>
 
     public ItemStack insertIntoEndpoint(Direction side, ItemStack stack) {
 
-        if (connections[side.ordinal()] == IDuct.ConnectionType.DISABLED || getAttachment(side) instanceof ItemFilterAttachment) {
+        if (connections[side.ordinal()] == IDuct.ConnectionType.DISABLED || !getAttachment(side).allowsGridOutput()) {
             return stack;
         }
         return insertIntoExternalEndpoint(side, stack);

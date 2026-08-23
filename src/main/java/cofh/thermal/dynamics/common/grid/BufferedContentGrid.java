@@ -30,6 +30,7 @@ public abstract class BufferedContentGrid<G extends BufferedContentGrid<G, N, S>
 
     protected static final String TAG_STORAGE = "Storage";
     protected static final String TAG_OVERFLOW = "Overflow";
+    protected static final String TAG_ORIGINS = "Origins";
 
     protected final OverflowBuffer.Ops<S> contentOps;
     protected final OverflowBuffer<S> overflowBuffer;
@@ -82,8 +83,11 @@ public abstract class BufferedContentGrid<G extends BufferedContentGrid<G, N, S>
 
     protected abstract void loadStorage(HolderLookup.Provider provider, CompoundTag tag);
 
-    /** Drains {@code amount} of the held content, overflow buffer first, then storage. */
-    protected abstract void drainHeld(long amount);
+    /** Inserts into the storage tank; returns the accepted amount. */
+    protected abstract long storageInsert(S resource, boolean execute);
+
+    /** Extracts from the storage tank; returns the extracted amount. */
+    protected abstract long storageExtract(long amount, boolean execute);
 
     /** Hook for reading pre-{@code TAG_STORAGE} save layouts; default is a no-op. */
     protected void readLegacyStorage(HolderLookup.Provider provider, CompoundTag nbt) {
@@ -163,6 +167,173 @@ public abstract class BufferedContentGrid<G extends BufferedContentGrid<G, N, S>
             visitedTargets.clear();
         }
         return amount - toSend;
+    }
+    /**
+     * Acceptance gate for external pushes. Content is accepted when it matches what the grid
+     * already carries (fast path - continuous flows skip the network walk entirely), when it could
+     * be delivered somewhere right now, or when a reachable endpoint already contains the same
+     * content - a momentarily full destination still counts as a route, so the duct keeps its
+     * buffering role. Only content with no route at all is rejected.
+     */
+    public final boolean isExternallyAcceptable(S resource, BlockPos inserter) {
+
+        if (contentOps.isEmpty(resource)) {
+            return false;
+        }
+        S held = heldContent();
+        if (!contentOps.isEmpty(held)) {
+            // Mismatched types are rejected by the insert itself; matching types joined an episode
+            // that was already routable when it started.
+            return contentOps.sameType(held, resource);
+        }
+        if (simulateRoutable(resource, contentOps.amount(resource), inserter) > 0) {
+            return true;
+        }
+        return endpointContainsSame(resource, inserter);
+    }
+
+    /** Whether any reachable endpoint besides {@code inserter} and the origins holds the same content. */
+    private boolean endpointContainsSame(S resource, BlockPos inserter) {
+
+        List<N> list = nodeList;
+        if (list.size() != getNodes().size()) {
+            list = List.copyOf(getNodes().values());
+            nodeList = list;
+            nodeTracker = 0;
+        }
+        for (N node : list) {
+            if (node.isLoaded() && node.containsSameContent(resource, inserter, contentOrigins)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    // endregion
+
+    // region CONTENT TRANSFER
+    /**
+     * Shared insert algorithm: type check, reentrancy guard, headroom clamp, storage first, then
+     * direct distribution of the overflow to endpoints. Returns the accepted amount.
+     */
+    protected final long insertContent(S resource, boolean execute) {
+
+        long amount = contentOps.amount(resource);
+        if (contentOps.isEmpty(resource) || amount <= 0 || isSendingContent) {
+            return 0;
+        }
+        S held = heldContent();
+        if (!contentOps.isEmpty(held) && !contentOps.sameType(held, resource)) {
+            return 0;
+        }
+        if (!isReplayingOverflow) {
+            long headroom = overflowHeadroom();
+            if (headroom <= 0) {
+                return 0;
+            }
+            if (amount > headroom) {
+                amount = headroom;
+                resource = contentOps.withAmount(resource, headroom);
+            }
+        }
+        long added = storageInsert(resource, execute);
+        long overflow = amount - added;
+        long sent = overflow <= 0 ? 0 : distributeOverflow(resource, overflow, execute);
+        long accepted = added + sent;
+        if (execute && !isReplayingOverflow && accepted > 0) {
+            auditNoteIn(accepted);
+            ThermalDynamics.LOG.debug("{} grid {} insert: offered {} added {} sent {}", contentName, getId(), amount, added, sent);
+        }
+        return accepted;
+    }
+
+    /** Drains held content, overflow buffer first, then storage; returns the drained amount. */
+    protected final long extractContent(long amount, boolean execute) {
+
+        if (amount <= 0) {
+            return 0;
+        }
+        long drained;
+        if (overflowBuffer.isEmpty()) {
+            drained = storageExtract(amount, execute);
+        } else {
+            long pending = contentOps.amount(overflowBuffer.peek(amount));
+            if (execute) {
+                overflowBuffer.drain(pending);
+            }
+            drained = pending + (amount > pending ? storageExtract(amount - pending, execute) : 0);
+        }
+        if (execute && !isDrainingHeld) {
+            auditNoteOut(drained);
+        }
+        return drained;
+    }
+
+    /** Drains content already delivered by {@link #distributeOutput()}; not an external extraction. */
+    protected final void drainHeld(long amount) {
+
+        isDrainingHeld = true;
+        try {
+            extractContent(amount, true);
+        } finally {
+            isDrainingHeld = false;
+        }
+    }
+
+    /** Re-offers parked overflow to storage and endpoints; returns the amount moved out of the buffer. */
+    public final long replayOverflow() {
+
+        S offered = overflowBuffer.peek(Long.MAX_VALUE);
+        if (contentOps.isEmpty(offered)) {
+            return 0;
+        }
+        long accepted;
+        isReplayingOverflow = true;
+        try {
+            accepted = insertContent(offered, true);
+        } finally {
+            isReplayingOverflow = false;
+        }
+        overflowBuffer.drain(accepted);
+        return accepted;
+    }
+
+    /**
+     * Executes an insert and parks any unaccepted remainder in the overflow buffer. For callers
+     * that have already irrevocably extracted the content from its source (servos); a shortfall
+     * beyond storage, endpoints and buffer is logged.
+     */
+    public final long insertOrPark(S resource) {
+
+        long amount = contentOps.amount(resource);
+        long accepted = insertContent(resource, true);
+        long leftover = amount - accepted;
+        if (leftover <= 0) {
+            return accepted;
+        }
+        long parked = overflowBuffer.add(resource, leftover);
+        auditNoteIn(parked);
+        noteOverflowParked();
+        if (parked < leftover) {
+            ThermalDynamics.LOG.warn("{} overflow buffer rejected {}", contentName, leftover - parked);
+        }
+        return accepted + parked;
+    }
+
+    /** Gate and origin bookkeeping for a push from the block at {@code inserter}; returns the accepted amount. */
+    public final long externalInsert(S resource, boolean execute, BlockPos inserter) {
+
+        if (contentOps.isEmpty(resource) || !isExternallyAcceptable(resource, inserter)) {
+            return 0;
+        }
+        if (!execute) {
+            return insertContent(resource, false);
+        }
+        boolean added = markContentOrigin(inserter);
+        long accepted = insertContent(resource, true);
+        if (added && accepted <= 0) {
+            unmarkContentOrigin(inserter);
+        }
+        return accepted;
     }
     // endregion
 
@@ -318,6 +489,7 @@ public abstract class BufferedContentGrid<G extends BufferedContentGrid<G, N, S>
             outputHosts.clear();
         }
         if (acceptedTotal > 0) {
+            ThermalDynamics.LOG.debug("{} grid {} output: total {} over {} connections, delivered {}", contentName, getId(), total, connectionTotal, acceptedTotal);
             drainHeld(acceptedTotal);
         }
     }
@@ -468,6 +640,16 @@ public abstract class BufferedContentGrid<G extends BufferedContentGrid<G, N, S>
         if (!overflowBuffer.isEmpty()) {
             tag.put(TAG_OVERFLOW, overflowBuffer.serializeNBT(provider));
         }
+        // Origins travel with the held content so a reload mid-flow cannot deliver in-transit
+        // content back to its inserters.
+        if (!contentOrigins.isEmpty()) {
+            long[] origins = new long[contentOrigins.size()];
+            int i = 0;
+            for (BlockPos pos : contentOrigins) {
+                origins[i++] = pos.asLong();
+            }
+            tag.putLongArray(TAG_ORIGINS, origins);
+        }
         return tag;
     }
 
@@ -499,6 +681,9 @@ public abstract class BufferedContentGrid<G extends BufferedContentGrid<G, N, S>
         }
         if (!overflowBuffer.isEmpty()) {
             noteOverflowParked();
+        }
+        for (long packed : nbt.getLongArray(TAG_ORIGINS)) {
+            contentOrigins.add(BlockPos.of(packed));
         }
     }
     // endregion

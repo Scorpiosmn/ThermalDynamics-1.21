@@ -29,6 +29,29 @@ public class ChemicalGridNode extends ContentGridNode<ChemicalGrid, ChemicalStac
     }
 
     @Override
+    protected long handlerContentTotal(IChemicalHandler handler) {
+
+        long total = 0;
+        for (int tank = 0; tank < handler.getChemicalTanks(); ++tank) {
+            long amount = handler.getChemicalInTank(tank).getAmount();
+            total = Long.MAX_VALUE - total < amount ? Long.MAX_VALUE : total + amount;
+        }
+        return total;
+    }
+
+    @Override
+    protected boolean handlerContainsSame(IChemicalHandler handler, ChemicalStack stack) {
+
+        for (int tank = 0; tank < handler.getChemicalTanks(); ++tank) {
+            ChemicalStack inTank = handler.getChemicalInTank(tank);
+            if (!inTank.isEmpty() && ChemicalStack.isSameChemical(inTank, stack)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
     protected boolean isEmptyStack(ChemicalStack stack) {
 
         return stack.isEmpty();

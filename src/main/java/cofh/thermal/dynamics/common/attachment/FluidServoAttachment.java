@@ -25,10 +25,7 @@ import net.neoforged.neoforge.capabilities.BlockCapability;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-
-import java.util.function.Predicate;
 
 import static cofh.lib.util.Constants.BUCKET_VOLUME;
 import static cofh.lib.util.constants.NBTTags.TAG_AMOUNT;
@@ -151,7 +148,7 @@ public class FluidServoAttachment implements IFilterableAttachment, IRedstoneCon
             return 0;
         }
         if (!grid.getOverflowBuffer().isEmpty()) {
-            drainOverflowIntoGrid(grid, Integer.MAX_VALUE);
+            grid.replayOverflow();
             if (!grid.getOverflowBuffer().isEmpty()) {
                 return 0;
             }
@@ -181,29 +178,8 @@ public class FluidServoAttachment implements IFilterableAttachment, IRedstoneCon
             restoreToSource(external, extracted);
             return 0;
         }
-        int inserted = Math.max(0, grid.fill(extracted, EXECUTE));
-        int leftover = extracted.getAmount() - inserted;
-        if (leftover > 0) {
-            long parked = grid.getOverflowBuffer().add(extracted, leftover);
-            grid.auditNoteIn(parked);
-            grid.noteOverflowParked();
-            if (parked < leftover) {
-                ThermalDynamics.LOG.warn("Fluid overflow buffer rejected {} mB", leftover - parked);
-            }
-        }
+        grid.insertOrPark(extracted);
         return extracted.getAmount();
-    }
-
-    private static int drainOverflowIntoGrid(FluidGrid grid, int maxAmount) {
-
-        OverflowBuffer<FluidStack> buffer = grid.getOverflowBuffer();
-        FluidStack offered = buffer.peek(maxAmount);
-        if (offered.isEmpty()) {
-            return 0;
-        }
-        int accepted = Math.max(0, grid.replayOverflow(offered));
-        buffer.drain(accepted);
-        return accepted;
     }
 
     private static void restoreToSource(IFluidHandler external, FluidStack stack) {
@@ -249,23 +225,16 @@ public class FluidServoAttachment implements IFilterableAttachment, IRedstoneCon
     @Override
     public <T, C> T wrapGridCapability(BlockCapability<T, C> capability, T gridCapIn) {
 
-        if (capability == Capabilities.FluidHandler.BLOCK) {
-            if (gridCapIn instanceof IFluidHandler handler) {
-                return (T) new WrappedGridFluidHandler(handler);
-            }
-        }
-        return gridCapIn;
+        // Servo sides are not an interface for the neighbor: it can neither push into nor pull
+        // from the duct here - the servo drives all flow through this face.
+        return null;
     }
 
     @Nullable
     @Override
     public <T, C> T wrapExternalCapability(BlockCapability<T, C> capability, T extCapIn) {
 
-        if (capability == Capabilities.FluidHandler.BLOCK) {
-            if (extCapIn instanceof IFluidHandler handler) {
-                return (T) new WrappedExternalFluidHandler(handler, e -> rsControl.getState() && filter.valid(e));
-            }
-        }
+        // Delivery back out through this side is already excluded by allowsGridOutput().
         return extCapIn;
     }
 
@@ -346,126 +315,6 @@ public class FluidServoAttachment implements IFilterableAttachment, IRedstoneCon
 
         rsControl.writeSettings(tag);
         filter.write(tag);
-    }
-    // endregion
-
-    // region GRID WRAPPER CLASS
-    private static class WrappedGridFluidHandler implements IFluidHandler {
-
-        protected IFluidHandler wrappedHandler;
-
-        public WrappedGridFluidHandler(IFluidHandler wrappedHandler) {
-
-            this.wrappedHandler = wrappedHandler;
-        }
-
-        @Override
-        public int getTanks() {
-
-            return wrappedHandler.getTanks();
-        }
-
-        @NotNull
-        @Override
-        public FluidStack getFluidInTank(int tank) {
-
-            return wrappedHandler.getFluidInTank(tank);
-        }
-
-        @Override
-        public int getTankCapacity(int tank) {
-
-            return wrappedHandler.getTankCapacity(tank);
-        }
-
-        @Override
-        public boolean isFluidValid(int tank, @NotNull FluidStack stack) {
-
-            return wrappedHandler.isFluidValid(tank, stack);
-        }
-
-        @Override
-        public int fill(FluidStack resource, FluidAction action) {
-
-            return 0;
-        }
-
-        @NotNull
-        @Override
-        public FluidStack drain(FluidStack resource, FluidAction action) {
-
-            return FluidStack.EMPTY;
-        }
-
-        @NotNull
-        @Override
-        public FluidStack drain(int maxDrain, FluidAction action) {
-
-            return FluidStack.EMPTY;
-        }
-
-    }
-    // endregion
-
-    // region EXTERNAL WRAPPER CLASS
-    private static class WrappedExternalFluidHandler implements IFluidHandler {
-
-        protected IFluidHandler wrappedHandler;
-
-        protected Predicate<FluidStack> validator;
-
-        public WrappedExternalFluidHandler(IFluidHandler wrappedHandler, Predicate<FluidStack> validator) {
-
-            this.wrappedHandler = wrappedHandler;
-            this.validator = validator;
-        }
-
-        @Override
-        public int getTanks() {
-
-            return wrappedHandler.getTanks();
-        }
-
-        @NotNull
-        @Override
-        public FluidStack getFluidInTank(int tank) {
-
-            return wrappedHandler.getFluidInTank(tank);
-        }
-
-        @Override
-        public int getTankCapacity(int tank) {
-
-            return wrappedHandler.getTankCapacity(tank);
-        }
-
-        @Override
-        public boolean isFluidValid(int tank, @NotNull FluidStack stack) {
-
-            return validator.test(stack) && wrappedHandler.isFluidValid(tank, stack);
-        }
-
-        @Override
-        public int fill(FluidStack resource, FluidAction action) {
-
-            return 0;
-            // return validator.test(resource) ? wrappedHandler.fill(resource, action) : 0;
-        }
-
-        @NotNull
-        @Override
-        public FluidStack drain(FluidStack resource, FluidAction action) {
-
-            return validator.test(resource) ? wrappedHandler.drain(resource, action) : FluidStack.EMPTY;
-        }
-
-        @NotNull
-        @Override
-        public FluidStack drain(int maxDrain, FluidAction action) {
-
-            return validator.test(wrappedHandler.drain(maxDrain, SIMULATE)) ? wrappedHandler.drain(maxDrain, action) : FluidStack.EMPTY;
-        }
-
     }
     // endregion
 }

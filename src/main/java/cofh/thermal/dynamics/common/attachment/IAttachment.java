@@ -32,6 +32,17 @@ public interface IAttachment extends INBTSerializable<CompoundTag> {
 
     }
 
+    /**
+     * Whether the grid may deliver content outward through this side. A duct port with any
+     * attachment installed is input-only by design (servos pull, filters gate incoming flow), so
+     * the default is {@code false}; only the empty attachment and direction-neutral attachments
+     * (energy limiter) permit outward delivery.
+     */
+    default boolean allowsGridOutput() {
+
+        return false;
+    }
+
     IAttachment read(CompoundTag nbt);
 
     default IAttachment read(CompoundTag nbt, HolderLookup.Provider provider) {

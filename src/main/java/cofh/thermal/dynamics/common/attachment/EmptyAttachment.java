@@ -17,6 +17,12 @@ public class EmptyAttachment implements IAttachment {
     }
 
     @Override
+    public boolean allowsGridOutput() {
+
+        return true;
+    }
+
+    @Override
     public Level world() {
 
         return null;

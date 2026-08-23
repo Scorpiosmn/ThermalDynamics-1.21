@@ -161,7 +161,7 @@ public class ChemicalServoAttachment implements IRedstoneControllableAttachment,
 
         if (!(duct.getGrid() instanceof ChemicalGrid grid) || limit <= 0) return 0;
         if (!grid.getOverflowBuffer().isEmpty()) {
-            drainOverflowIntoGrid(grid, Long.MAX_VALUE);
+            grid.replayOverflow();
             if (!grid.getOverflowBuffer().isEmpty()) return 0;
         }
         long budget = Math.min(limit, grid.overflowHeadroom());
@@ -179,27 +179,8 @@ public class ChemicalServoAttachment implements IRedstoneControllableAttachment,
             restoreToSource(external, tank, actual);
             return 0;
         }
-        ChemicalStack remainder = grid.insertChemical(actual, Action.EXECUTE);
-        if (!remainder.isEmpty()) {
-            long parked = grid.getOverflowBuffer().add(remainder);
-            grid.auditNoteIn(parked);
-            grid.noteOverflowParked();
-            if (parked < remainder.getAmount()) {
-                ThermalDynamics.LOG.warn("Chemical overflow buffer rejected {}", remainder.getAmount() - parked);
-            }
-        }
+        grid.insertOrPark(actual);
         return actual.getAmount();
-    }
-
-    private static long drainOverflowIntoGrid(ChemicalGrid grid, long maxAmount) {
-
-        OverflowBuffer<ChemicalStack> buffer = grid.getOverflowBuffer();
-        ChemicalStack offered = buffer.peek(maxAmount);
-        if (offered.isEmpty()) return 0;
-        ChemicalStack remainder = grid.replayOverflow(offered);
-        long accepted = offered.getAmount() - remainder.getAmount();
-        buffer.drain(accepted);
-        return accepted;
     }
 
     private static void restoreToSource(IChemicalHandler external, int tank, ChemicalStack stack) {
@@ -242,22 +223,18 @@ public class ChemicalServoAttachment implements IRedstoneControllableAttachment,
     }
 
     @Override
-    @SuppressWarnings ("unchecked")
+    @Nullable
     public <T, C> T wrapGridCapability(BlockCapability<T, C> capability, T gridCapability) {
 
-        if (capability == CHEMICAL_HANDLER && gridCapability instanceof IChemicalHandler handler) {
-            return (T) new OutputDisabledChemicalHandler(handler);
-        }
-        return gridCapability;
+        // Servo sides are not an interface for the neighbor: it can neither push into nor pull
+        // from the duct here - the servo drives all flow through this face.
+        return null;
     }
 
     @Override
-    @SuppressWarnings ("unchecked")
     public <T, C> T wrapExternalCapability(BlockCapability<T, C> capability, T externalCapability) {
 
-        if (capability == CHEMICAL_HANDLER && externalCapability instanceof IChemicalHandler handler) {
-            return (T) new InputDisabledChemicalHandler(handler);
-        }
+        // Delivery back out through this side is already excluded by allowsGridOutput().
         return externalCapability;
     }
 
@@ -352,45 +329,6 @@ public class ChemicalServoAttachment implements IRedstoneControllableAttachment,
             chemicals.add(ChemicalStack.OPTIONAL_STREAM_CODEC.decode((RegistryFriendlyByteBuf) buffer));
         }
         filter.setChemicals(chemicals);
-    }
-
-    private static class OutputDisabledChemicalHandler implements IChemicalHandler {
-
-        private final IChemicalHandler wrapped;
-
-        private OutputDisabledChemicalHandler(IChemicalHandler wrapped) {
-
-            this.wrapped = wrapped;
-        }
-
-        @Override public int getChemicalTanks() { return wrapped.getChemicalTanks(); }
-        @Override public ChemicalStack getChemicalInTank(int tank) { return wrapped.getChemicalInTank(tank); }
-        @Override public void setChemicalInTank(int tank, ChemicalStack stack) { wrapped.setChemicalInTank(tank, stack); }
-        @Override public long getChemicalTankCapacity(int tank) { return wrapped.getChemicalTankCapacity(tank); }
-        @Override public boolean isValid(int tank, ChemicalStack stack) { return false; }
-        @Override public ChemicalStack insertChemical(int tank, ChemicalStack stack, Action action) { return stack; }
-        @Override public ChemicalStack extractChemical(int tank, long amount, Action action) { return ChemicalStack.EMPTY; }
-    }
-
-    private class InputDisabledChemicalHandler implements IChemicalHandler {
-
-        private final IChemicalHandler wrapped;
-
-        private InputDisabledChemicalHandler(IChemicalHandler wrapped) {
-
-            this.wrapped = wrapped;
-        }
-
-        @Override public int getChemicalTanks() { return wrapped.getChemicalTanks(); }
-        @Override public ChemicalStack getChemicalInTank(int tank) { return wrapped.getChemicalInTank(tank); }
-        @Override public void setChemicalInTank(int tank, ChemicalStack stack) { wrapped.setChemicalInTank(tank, stack); }
-        @Override public long getChemicalTankCapacity(int tank) { return wrapped.getChemicalTankCapacity(tank); }
-        @Override public boolean isValid(int tank, ChemicalStack stack) { return false; }
-        @Override public ChemicalStack insertChemical(int tank, ChemicalStack stack, Action action) { return stack; }
-        @Override public ChemicalStack extractChemical(int tank, long amount, Action action) {
-            ChemicalStack contained = wrapped.getChemicalInTank(tank);
-            return rsControl.getState() && ChemicalFilterHelper.valid(filter, contained) ? wrapped.extractChemical(tank, amount, action) : ChemicalStack.EMPTY;
-        }
     }
 
 }

@@ -31,6 +31,28 @@ public class FluidGridNode extends ContentGridNode<FluidGrid, FluidStack, IFluid
     }
 
     @Override
+    protected long handlerContentTotal(IFluidHandler handler) {
+
+        long total = 0;
+        for (int tank = 0; tank < handler.getTanks(); ++tank) {
+            total += handler.getFluidInTank(tank).getAmount();
+        }
+        return total;
+    }
+
+    @Override
+    protected boolean handlerContainsSame(IFluidHandler handler, FluidStack stack) {
+
+        for (int tank = 0; tank < handler.getTanks(); ++tank) {
+            FluidStack inTank = handler.getFluidInTank(tank);
+            if (!inTank.isEmpty() && FluidStack.isSameFluidSameComponents(inTank, stack)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
     protected boolean isEmptyStack(FluidStack stack) {
 
         return stack.isEmpty();

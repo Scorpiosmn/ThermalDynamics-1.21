@@ -89,14 +89,15 @@ public class FluidGrid extends BufferedContentGrid<FluidGrid, FluidGridNode, Flu
     }
 
     @Override
-    protected void drainHeld(long amount) {
+    protected long storageInsert(FluidStack resource, boolean execute) {
 
-        isDrainingHeld = true;
-        try {
-            drain((int) Math.min(amount, Integer.MAX_VALUE), FluidAction.EXECUTE);
-        } finally {
-            isDrainingHeld = false;
-        }
+        return storage.fill(resource, execute ? FluidAction.EXECUTE : FluidAction.SIMULATE);
+    }
+
+    @Override
+    protected long storageExtract(long amount, boolean execute) {
+
+        return storage.drain((int) Math.min(amount, Integer.MAX_VALUE), execute ? FluidAction.EXECUTE : FluidAction.SIMULATE).getAmount();
     }
 
     @Override
@@ -186,21 +187,7 @@ public class FluidGrid extends BufferedContentGrid<FluidGrid, FluidGridNode, Flu
         @Override
         public int fill(FluidStack resource, FluidAction action) {
 
-            if (resource.isEmpty()) {
-                return 0;
-            }
-            if (simulateRoutable(resource, resource.getAmount(), externalPos) <= 0) {
-                return 0;
-            }
-            if (action.simulate()) {
-                return FluidGrid.this.fill(resource, action);
-            }
-            boolean added = markContentOrigin(externalPos);
-            int filled = FluidGrid.this.fill(resource, action);
-            if (added && filled <= 0) {
-                unmarkContentOrigin(externalPos);
-            }
-            return filled;
+            return (int) externalInsert(resource, action.execute(), externalPos);
         }
 
     }
@@ -219,11 +206,6 @@ public class FluidGrid extends BufferedContentGrid<FluidGrid, FluidGridNode, Flu
         if (after >= before) auditNoteIn(after - before); else auditNoteOut(before - after);
     }
     public void drainStorage(int amount) { if (amount > 0) auditNoteOut(storage.drain(amount, FluidAction.EXECUTE).getAmount()); }
-    public int replayOverflow(FluidStack offered) {
-        isReplayingOverflow = true;
-        try { return fill(offered, FluidAction.EXECUTE); }
-        finally { isReplayingOverflow = false; }
-    }
 
     @Override public int getTanks() { return storage.getTanks(); }
     @Override public FluidStack getFluidInTank(int tank) { return storage.getFluidInTank(tank); }
@@ -232,18 +214,9 @@ public class FluidGrid extends BufferedContentGrid<FluidGrid, FluidGridNode, Flu
         return resource.isEmpty() || held.isEmpty() || !FluidStack.isSameFluidSameComponents(resource, held) ? FluidStack.EMPTY : drain(resource.getAmount(), action);
     }
     @Override public FluidStack drain(int maxDrain, FluidAction action) {
-        FluidStack result;
-        if (overflowBuffer.isEmpty()) {
-            result = storage.drain(maxDrain, action);
-        } else {
-            FluidStack pending = overflowBuffer.peek(maxDrain);
-            int pendingAmount = pending.getAmount();
-            if (action.execute()) overflowBuffer.drain(pendingAmount);
-            FluidStack rest = maxDrain > pendingAmount ? storage.drain(maxDrain - pendingAmount, action) : FluidStack.EMPTY;
-            result = rest.isEmpty() ? pending : pending.copyWithAmount(pendingAmount + rest.getAmount());
-        }
-        if (action.execute() && !isDrainingHeld) auditNoteOut(result.getAmount());
-        return result;
+        FluidStack held = getHeldFluid();
+        long drained = extractContent(maxDrain, action.execute());
+        return drained <= 0 || held.isEmpty() ? FluidStack.EMPTY : held.copyWithAmount((int) drained);
     }
     @Override public int getTankCapacity(int tank) { return storage.getTankCapacity(tank); }
     @Override public boolean isFluidValid(int tank, @Nonnull FluidStack stack) { return storage.isFluidValid(tank, stack); }
@@ -252,28 +225,7 @@ public class FluidGrid extends BufferedContentGrid<FluidGrid, FluidGridNode, Flu
     @Override
     public int fill(FluidStack resource, FluidAction action) {
 
-        FluidStack held = getHeldFluid();
-        if (resource.isEmpty() || isSendingContent || (!held.isEmpty() && !FluidStack.isSameFluidSameComponents(held, resource))) {
-            return 0;
-        }
-        if (!isReplayingOverflow) {
-            long headroom = overflowHeadroom();
-            if (headroom <= 0) return 0;
-            if (resource.getAmount() > headroom) resource = resource.copyWithAmount((int) Math.min(headroom, Integer.MAX_VALUE));
-        }
-        int added = storage.fill(resource, action);
-        int overflow = resource.getAmount() - added;
-        if (overflow <= 0) {
-            if (action.execute() && !isReplayingOverflow) {
-                auditNoteIn(added);
-            }
-            return added;
-        }
-        long sent = distributeOverflow(resource, overflow, action.execute());
-        if (action.execute() && !isReplayingOverflow) {
-            auditNoteIn(added + sent);
-        }
-        return added + (int) sent;
+        return (int) insertContent(resource, action.execute());
     }
 
 }

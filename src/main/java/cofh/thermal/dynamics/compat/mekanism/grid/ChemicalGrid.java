@@ -88,14 +88,15 @@ public class ChemicalGrid extends BufferedContentGrid<ChemicalGrid, ChemicalGrid
     }
 
     @Override
-    protected void drainHeld(long amount) {
+    protected long storageInsert(ChemicalStack resource, boolean execute) {
 
-        isDrainingHeld = true;
-        try {
-            extractChemical(0, amount, Action.EXECUTE);
-        } finally {
-            isDrainingHeld = false;
-        }
+        return storage.insert(resource, execute ? Action.EXECUTE : Action.SIMULATE);
+    }
+
+    @Override
+    protected long storageExtract(long amount, boolean execute) {
+
+        return storage.extract(amount, execute ? Action.EXECUTE : Action.SIMULATE).getAmount();
     }
 
     @Override
@@ -171,21 +172,11 @@ public class ChemicalGrid extends BufferedContentGrid<ChemicalGrid, ChemicalGrid
         @Override
         public ChemicalStack insertChemical(ChemicalStack resource, Action action) {
 
-            if (resource.isEmpty()) {
+            long accepted = externalInsert(resource, action.execute(), externalPos);
+            if (accepted <= 0) {
                 return resource;
             }
-            if (simulateRoutable(resource, resource.getAmount(), externalPos) <= 0) {
-                return resource;
-            }
-            if (action.simulate()) {
-                return ChemicalGrid.this.insertChemical(resource, action);
-            }
-            boolean added = markContentOrigin(externalPos);
-            ChemicalStack remainder = ChemicalGrid.this.insertChemical(resource, action);
-            if (added && remainder.getAmount() >= resource.getAmount()) {
-                unmarkContentOrigin(externalPos);
-            }
-            return remainder;
+            return accepted >= resource.getAmount() ? ChemicalStack.EMPTY : resource.copyWithAmount(resource.getAmount() - accepted);
         }
 
     }
@@ -207,11 +198,6 @@ public class ChemicalGrid extends BufferedContentGrid<ChemicalGrid, ChemicalGrid
         return extractChemical(0, amount, action);
     }
     public void extractStorage(long amount) { if (amount > 0) auditNoteOut(storage.extract(amount, Action.EXECUTE).getAmount()); }
-    public ChemicalStack replayOverflow(ChemicalStack offered) {
-        isReplayingOverflow = true;
-        try { return insertChemical(offered, Action.EXECUTE); }
-        finally { isReplayingOverflow = false; }
-    }
     private void noteHeldSet(long before, long after) {
         if (after >= before) auditNoteIn(after - before); else auditNoteOut(before - after);
     }
@@ -229,54 +215,20 @@ public class ChemicalGrid extends BufferedContentGrid<ChemicalGrid, ChemicalGrid
     @Override
     public ChemicalStack insertChemical(ChemicalStack resource, Action action) {
 
-        ChemicalStack held = getHeldChemical();
-        if (resource.isEmpty() || isSendingContent || !held.isEmpty() && !ChemicalStack.isSameChemical(held, resource)) {
+        long accepted = insertContent(resource, action.execute());
+        if (accepted <= 0) {
             return resource;
         }
-        ChemicalStack original = resource;
-        long rejected = 0;
-        if (!isReplayingOverflow) {
-            long headroom = overflowHeadroom();
-            if (headroom <= 0) return resource;
-            if (resource.getAmount() > headroom) {
-                rejected = resource.getAmount() - headroom;
-                resource = resource.copyWithAmount(headroom);
-            }
-        }
-        long added = storage.insert(resource, action);
-        long overflow = resource.getAmount() - added;
-        if (overflow <= 0) {
-            if (action.execute() && !isReplayingOverflow) {
-                auditNoteIn(added);
-            }
-            return rejected <= 0 ? ChemicalStack.EMPTY : original.copyWithAmount(rejected);
-        }
-        long sent = distributeOverflow(resource, overflow, action.execute());
-        if (action.execute() && !isReplayingOverflow) {
-            auditNoteIn(added + sent);
-        }
-        long totalRemaining = rejected + (overflow - sent);
-        return totalRemaining == 0 ? ChemicalStack.EMPTY : original.copyWithAmount(totalRemaining);
+        return accepted >= resource.getAmount() ? ChemicalStack.EMPTY : resource.copyWithAmount(resource.getAmount() - accepted);
     }
 
     @Override
     public ChemicalStack extractChemical(int tank, long amount, Action action) {
 
         if (tank != 0) return ChemicalStack.EMPTY;
-        ChemicalStack result;
-        if (overflowBuffer.isEmpty()) {
-            result = storage.extract(amount, action);
-        } else {
-            ChemicalStack pending = overflowBuffer.peek(amount);
-            long pendingAmount = pending.getAmount();
-            if (action.execute()) overflowBuffer.drain(pendingAmount);
-            ChemicalStack rest = amount > pendingAmount ? storage.extract(amount - pendingAmount, action) : ChemicalStack.EMPTY;
-            result = rest.isEmpty() ? pending : pending.copyWithAmount(pendingAmount + rest.getAmount());
-        }
-        if (action.execute() && !isDrainingHeld) {
-            auditNoteOut(result.getAmount());
-        }
-        return result;
+        ChemicalStack held = getHeldChemical();
+        long drained = extractContent(amount, action.execute());
+        return drained <= 0 || held.isEmpty() ? ChemicalStack.EMPTY : held.copyWithAmount(drained);
     }
 
     @Override
