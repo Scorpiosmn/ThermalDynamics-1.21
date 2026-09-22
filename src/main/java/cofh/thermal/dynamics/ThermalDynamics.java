@@ -70,7 +70,7 @@ public class ThermalDynamics {
 
         mekanismLoaded = ModList.get().isLoaded("mekanism");
         if (mekanismLoaded) {
-            cofh.thermal.dynamics.compat.mekanism.MekanismCompat.register();
+            //cofh.thermal.dynamics.compat.mekanism.MekanismCompat.register();
         }
 
         modEventBus.addListener(this::commonSetup);
@@ -127,7 +127,7 @@ public class ThermalDynamics {
         event.registerBlockEntity(TDynApi.GRID_HOST_CAPABILITY, FLUID_DUCT_WINDOWED_BLOCK_ENTITY.get(), (tile, ctx) -> tile);
         event.registerBlockEntity(TDynApi.GRID_HOST_CAPABILITY, ITEM_DUCT_BLOCK_ENTITY.get(), (tile, ctx) -> tile);
         if (mekanismLoaded) {
-            cofh.thermal.dynamics.compat.mekanism.MekanismCompat.registerCapabilities(event);
+            //cofh.thermal.dynamics.compat.mekanism.MekanismCompat.registerCapabilities(event);
         }
 
         registerPassthroughCapability(event, Capabilities.EnergyStorage.BLOCK, unsafeCast(ENERGY_DUCT_BLOCK_ENTITY.get()));
@@ -154,7 +154,7 @@ public class ThermalDynamics {
         event.register(FLUID_TURBO_SERVO_ATTACHMENT_CONTAINER.get(), FluidTurboServoAttachmentScreen::new);
         event.register(ITEM_SERVO_ATTACHMENT_CONTAINER.get(), ItemServoAttachmentScreen::new);
         if (mekanismLoaded) {
-            cofh.thermal.dynamics.compat.mekanism.client.MekanismClientCompat.registerMenuScreens(event);
+            //cofh.thermal.dynamics.compat.mekanism.client.MekanismClientCompat.registerMenuScreens(event);
         }
     }
 
@@ -175,7 +175,7 @@ public class ThermalDynamics {
         ItemBlockRenderTypes.setRenderLayer(BLOCKS.get(ID_FLUID_DUCT_WINDOWED), renderType -> renderType == cutout || renderType == translucent);
         ItemBlockRenderTypes.setRenderLayer(BLOCKS.get(ID_ITEM_DUCT), cutout);
         if (mekanismLoaded) {
-            cofh.thermal.dynamics.compat.mekanism.client.MekanismClientCompat.registerRenderLayers(cutout, translucent);
+            //cofh.thermal.dynamics.compat.mekanism.client.MekanismClientCompat.registerRenderLayers(cutout, translucent);
         }
     }
     // endregion
