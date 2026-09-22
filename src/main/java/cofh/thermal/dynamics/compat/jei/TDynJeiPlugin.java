@@ -16,7 +16,7 @@ public final class TDynJeiPlugin implements IModPlugin {
     public void registerGuiHandlers(IGuiHandlerRegistration registration) {
 
         if (ModList.get().isLoaded("mekanism")) {
-            registration.addGhostIngredientHandler(cofh.core.client.gui.ContainerScreenCoFH.class, new ChemicalFilterGhostHandler());
+            //registration.addGhostIngredientHandler(cofh.core.client.gui.ContainerScreenCoFH.class, new ChemicalFilterGhostHandler());
         }
     }
 
