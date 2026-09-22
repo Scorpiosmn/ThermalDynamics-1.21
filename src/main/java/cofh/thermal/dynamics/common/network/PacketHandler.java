@@ -26,7 +26,7 @@ public class PacketHandler {
         registrar.playToServer(AttachmentConfigPayload.TYPE, AttachmentConfigPayload.STREAM_CODEC, AttachmentConfigPacket.get()::handle);
         registrar.playToServer(AttachmentRedstoneControlPayload.TYPE, AttachmentRedstoneControlPayload.STREAM_CODEC, AttachmentRedstoneControlPacket.get()::handle);
         if (ModList.get().isLoaded("mekanism")) {
-            cofh.thermal.dynamics.compat.mekanism.MekanismCompat.registerNetworking(registrar);
+            //cofh.thermal.dynamics.compat.mekanism.MekanismCompat.registerNetworking(registrar);
         }
 
         // CLIENT
