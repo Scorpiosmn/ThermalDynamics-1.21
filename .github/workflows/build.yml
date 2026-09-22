@@ -1,4 +1,4 @@
-name: Build ThermalFoundation
+name: Build ThermalDynamics
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout ThermalFoundation
+      - name: Checkout ThermalDynamics
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -40,8 +40,8 @@ jobs:
           echo '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>com.teamcofh</groupId><artifactId>thermal_core</artifactId><version>1.21.1-11.0.7.0</version></project>' > $M2_DIR/thermal_core-1.21.1-11.0.7.0.pom
           ls -la $M2_DIR
       
-      # ================= 构建 ThermalFoundation =================
-      - name: Build ThermalFoundation
+      # ================= 构建 ThermalDynamics =================
+      - name: Build ThermalDynamics
         run: |
           chmod +x ./gradlew
           ./gradlew build --no-daemon --stacktrace
@@ -49,7 +49,7 @@ jobs:
       - name: Upload mod jars
         uses: actions/upload-artifact@v4
         with:
-          name: foundation-jars
+          name: dynamics-jars
           path: |
             **/build/libs/*.jar
             !**/build/libs/*-sources.jar
