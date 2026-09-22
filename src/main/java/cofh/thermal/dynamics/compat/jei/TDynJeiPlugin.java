@@ -1,6 +1,6 @@
 package cofh.thermal.dynamics.compat.jei;
 
-import cofh.thermal.dynamics.compat.mekanism.client.jei.ChemicalFilterGhostHandler;
+//import cofh.thermal.dynamics.compat.mekanism.client.jei.ChemicalFilterGhostHandler;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
