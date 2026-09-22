@@ -39,7 +39,14 @@ jobs:
           find local_libs -name "thermal_core-*.jar" -exec cp {} $M2_DIR/thermal_core-1.21.1-11.0.7.0.jar \;
           echo '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>com.teamcofh</groupId><artifactId>thermal_core</artifactId><version>1.21.1-11.0.7.0</version></project>' > $M2_DIR/thermal_core-1.21.1-11.0.7.0.pom
           ls -la $M2_DIR
-      
+
+      # ================= 移除 Mekanism 联动类文件 =================
+      - name: Remove Mekanism Compat
+        run: |
+          echo "正在删除 ThermalDynamics 的 Mekanism 联动文件夹..."
+          rm -rf src/main/java/cofh/thermal/dynamics/compat/mekanism
+          echo "Mekanism 联动文件夹已删除！"
+          
       # ================= 构建 ThermalDynamics =================
       - name: Build ThermalDynamics
         run: |
